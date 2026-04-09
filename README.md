@@ -17,7 +17,7 @@ A fast, feature-rich web spider and content extraction tool built for security r
 ## Installation
 
 ```bash
-git clone https://github.com/yourusername/scrapper_rapper
+[git clone https://github.com/yourusername/scrapper_rapper](https://github.com/Fazliddin31/Scrapper-Rapper.git)
 cd scrapper_rapper
 chmod +x scrapper_rapper.sh
 ```
