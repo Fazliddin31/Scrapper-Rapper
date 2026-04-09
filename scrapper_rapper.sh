@@ -82,13 +82,13 @@ APPEND=false
 # ════════════════════════════════════════════════════════════════════
 _c() { $NO_COLOR && echo -ne "$2" || echo -ne "$1$2$N"; }
 
-log()   { $SILENT || { [[ $VERBOSITY -ge 1 ]] && echo -e "$(_c "$W" '[*]') $*"; }; }
-info()  { $SILENT || { [[ $VERBOSITY -ge 2 ]] && echo -e "$(_c "$B" '[i]') $*"; }; }
-verb()  { $SILENT || { [[ $VERBOSITY -ge 3 ]] && echo -e "$(_c "$DIM" '[~]') $*"; }; }
-debug() { $SILENT || { [[ $VERBOSITY -ge 4 ]] && echo -e "$(_c "$M" '[d]') $*"; }; }
-trace() { $SILENT || { [[ $VERBOSITY -ge 5 ]] && echo -e "$(_c "$DIM" '[t]') $*"; }; }
-ok()    {            { [[ $VERBOSITY -ge 1 ]] && echo -e "$(_c "$G" '[+]') $*"; }; }
-warn()  { $SILENT || { [[ $VERBOSITY -ge 1 ]] && echo -e "$(_c "$Y" '[!]') $*"; }; }
+log()   { $SILENT || { [[ $VERBOSITY -ge 1 ]] && echo -e "$(_c "$W" '[*]') $*"; } || true; }
+info()  { $SILENT || { [[ $VERBOSITY -ge 2 ]] && echo -e "$(_c "$B" '[i]') $*"; } || true; }
+verb()  { $SILENT || { [[ $VERBOSITY -ge 3 ]] && echo -e "$(_c "$DIM" '[~]') $*"; } || true; }
+debug() { $SILENT || { [[ $VERBOSITY -ge 4 ]] && echo -e "$(_c "$M" '[d]') $*"; } || true; }
+trace() { $SILENT || { [[ $VERBOSITY -ge 5 ]] && echo -e "$(_c "$DIM" '[t]') $*"; } || true; }
+ok()    {            { [[ $VERBOSITY -ge 1 ]] && echo -e "$(_c "$G" '[+]') $*"; } || true; }
+warn()  { $SILENT || { [[ $VERBOSITY -ge 1 ]] && echo -e "$(_c "$Y" '[!]') $*"; } || true; }
 err()   { echo -e "$(_c "$R" '[✗]') $*" >&2; }
 die()   { err "$*"; exit 1; }
 
@@ -180,6 +180,11 @@ ${H}Passive Sources:${X}
 ${H}Output:${X}
       ${S}--json${E}                            Also write results as JSON
 
+${H}Full mode:${X}
+      ${S}--full${E}                            Enable all extractions + JSON output
+                                       (emails, secrets, endpoints, forms,
+                                        comments, params, json)
+
 ${H}Misc:${X}
   ${S}-h${E}, ${S}--help${E}                     Show this help
 
@@ -198,6 +203,8 @@ ${H}Examples:${X}
   $(basename "$0") -u https://example.com -S --subdomains --json --download-js
   $(basename "$0") -u https://example.com --exclude '\.(png|jpg|gif)$' --depth 10
   $(basename "$0") -u https://example.com -q --no-color -o /tmp/out
+  $(basename "$0") -u https://example.com --full
+  $(basename "$0") -u https://example.com --full -v 3 -d 5 --wayback --gau
 EOF
 }
 
@@ -261,6 +268,12 @@ while [[ $# -gt 0 ]]; do
     --subfinder)         USE_SUBFINDER=true;       shift   ;;
     # output
     --json)              JSON_OUTPUT=true;         shift   ;;
+    # full mode
+    --full)
+      EXTRACT_EMAILS=true; EXTRACT_SECRETS=true; EXTRACT_ENDPOINTS=true
+      EXTRACT_FORMS=true;  EXTRACT_COMMENTS=true; EXTRACT_PARAMS=true
+      JSON_OUTPUT=true
+      shift ;;
     # misc
     -h|--help)           banner; usage;            exit 0  ;;
     *) die "Unknown option: $1  — use -h for help" ;;
@@ -344,11 +357,12 @@ _curl() {
   done
 
   debug "GET $url"
-  curl "${args[@]}" "$url" 2>/dev/null
+  curl "${args[@]}" "$url" 2>/dev/null || true
 
   # rate / delay
   [[ $RATE -gt 0 ]] && sleep "$(echo "scale=3; 1/$RATE" | bc)"
   [[ $DELAY -gt 0 ]] && sleep "$DELAY"
+  return 0
 }
 
 # ════════════════════════════════════════════════════════════════════
@@ -426,7 +440,7 @@ extract_urls() {
     | grep -oP '(?<=")[^"]+' \
     | grep -vP '^\s*$|^mailto:|^tel:|^javascript:|^#|^data:' \
     | while IFS= read -r u; do normalise_url "$u" "$base"; done \
-    | grep -P "^https?://" | sort -u
+    | grep -P "^https?://" | sort -u || true
 }
 
 # --- JS files ---
@@ -436,7 +450,7 @@ extract_js() {
     | grep -oP '(?:src|data-src)="[^"]+\.js[^"]*"' \
     | grep -oP '(?<=")[^"]+' \
     | while IFS= read -r u; do normalise_url "$u" "$base"; done \
-    | grep -P "^https?://" | sort -u
+    | grep -P "^https?://" | sort -u || true
 }
 
 # --- CSS files ---
@@ -446,7 +460,7 @@ extract_css() {
     | grep -oP '(?:href|src)="[^"]+\.css[^"]*"' \
     | grep -oP '(?<=")[^"]+' \
     | while IFS= read -r u; do normalise_url "$u" "$base"; done \
-    | grep -P "^https?://" | sort -u
+    | grep -P "^https?://" | sort -u || true
 }
 
 # --- generic asset by extension ---
@@ -456,7 +470,7 @@ extract_ext() {
     | grep -oP "(?:href|src)=\"[^\"]+\.$ext[^\"]*\"" \
     | grep -oP '(?<=")[^"]+' \
     | while IFS= read -r u; do normalise_url "$u" "$base"; done \
-    | grep -P "^https?://" | sort -u
+    | grep -P "^https?://" | sort -u || true
 }
 
 # --- emails ---
@@ -464,7 +478,7 @@ extract_emails() {
   local html="$1"
   echo "$html" \
     | grep -oP '[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}' \
-    | sort -u
+    | sort -u || true
 }
 
 # --- HTML comments ---
@@ -473,7 +487,7 @@ extract_comments() {
   echo "$html" \
     | grep -oP '<!--.*?-->' \
     | grep -v '^\s*<!--\s*-->\s*$' \
-    | sort -u
+    | sort -u || true
 }
 
 # --- form actions + inputs ---
@@ -484,7 +498,7 @@ extract_forms() {
     | grep -oP 'action="[^"]+"' \
     | grep -oP '(?<=action=")[^"]+' \
     | while IFS= read -r u; do normalise_url "$u" "$base"; done \
-    | sort -u
+    | sort -u || true
 }
 
 # --- URL params ---
@@ -494,7 +508,7 @@ extract_params() {
     | grep -oP 'https?://[^\s"<>]+\?[^\s"<>]+' \
     | grep -oP '\?[^\s"<>]+' \
     | grep -oP '(?<=\?|&)[^&=]+(?==)' \
-    | sort -u
+    | sort -u || true
 }
 
 # --- API endpoints from JS ---
@@ -504,7 +518,7 @@ extract_api_endpoints() {
     | grep -oP '(?:"|'"'"')(\/[a-zA-Z0-9_\-\/\.]+(?:\/[a-zA-Z0-9_\-]+)*)(?:"|'"'"')' \
     | grep -oP '(?<="|'"'"')\/[^"'"'"']+' \
     | grep -vP '\.(js|css|png|jpg|gif|svg|ico|woff|ttf)$' \
-    | sort -u
+    | sort -u || true
 }
 
 # --- secrets / sensitive patterns ---
@@ -650,8 +664,8 @@ run_js_extraction() {
     echo "$url"
     curl -s "$url" \
       | grep -oP '(?<=src=")[^"]+\.js[^"]*' \
-      | sed -E "s|^/|$url/|; s|^([^h])|$url/\1|"
-  ) | sort -u >> "$jsfile"
+      | sed -E "s|^/|$url/|; s|^([^h])|$url/\1|" || true
+  ) | sort -u >> "$jsfile" || true
 
   # spider harvest
   [[ -f "$TMP/js_raw.txt" ]] && { sort -u "$TMP/js_raw.txt" >> "$jsfile"; }
@@ -855,10 +869,10 @@ categorize() {
     > "$OUTPUT_DIR/endpoints/dynamic.txt" || true
 
   # extra extractions
-  $EXTRACT_EMAILS   && [[ -f "$TMP/emails_raw.txt"   ]] && sort -u "$TMP/emails_raw.txt"   > "$OUTPUT_DIR/extra/emails.txt"
-  $EXTRACT_COMMENTS && [[ -f "$TMP/comments_raw.txt" ]] && sort -u "$TMP/comments_raw.txt" > "$OUTPUT_DIR/extra/comments.txt"
-  $EXTRACT_FORMS    && [[ -f "$TMP/forms_raw.txt"    ]] && sort -u "$TMP/forms_raw.txt"    > "$OUTPUT_DIR/extra/forms.txt"
-  $EXTRACT_PARAMS   && [[ -f "$TMP/params_raw.txt"   ]] && sort -u "$TMP/params_raw.txt"   > "$OUTPUT_DIR/extra/params.txt"
+  $EXTRACT_EMAILS   && [[ -f "$TMP/emails_raw.txt"   ]] && sort -u "$TMP/emails_raw.txt"   > "$OUTPUT_DIR/extra/emails.txt"   || true
+  $EXTRACT_COMMENTS && [[ -f "$TMP/comments_raw.txt" ]] && sort -u "$TMP/comments_raw.txt" > "$OUTPUT_DIR/extra/comments.txt" || true
+  $EXTRACT_FORMS    && [[ -f "$TMP/forms_raw.txt"    ]] && sort -u "$TMP/forms_raw.txt"    > "$OUTPUT_DIR/extra/forms.txt"    || true
+  $EXTRACT_PARAMS   && [[ -f "$TMP/params_raw.txt"   ]] && sort -u "$TMP/params_raw.txt"   > "$OUTPUT_DIR/extra/params.txt"   || true
 }
 
 # ════════════════════════════════════════════════════════════════════
@@ -895,7 +909,7 @@ JSONEOF
 # ════════════════════════════════════════════════════════════════════
 #  SUMMARY
 # ════════════════════════════════════════════════════════════════════
-_cnt() { grep -c . "$1" 2>/dev/null || echo 0; }
+_cnt() { if [[ -f "$1" ]]; then grep -c . "$1" 2>/dev/null || true; else echo 0; fi; }
 
 summary() {
   local all js css docs arcs imgs dyn em sec ep frm prm sub
